@@ -1,0 +1,100 @@
+# ==========================================================
+# TERRAFORM SETTINGS
+# ==========================================================
+terraform {
+  required_version = ">= 1.2.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 4.16"
+    }
+  }
+}
+
+# ==========================================================
+# AWS PROVIDER
+# ==========================================================
+provider "aws" {
+  region = "us-west-2"
+}
+
+# ==========================================================
+# GET AWS ACCOUNT ID
+# ==========================================================
+data "aws_caller_identity" "current" {}
+
+locals {
+  account_id = data.aws_caller_identity.current.account_id
+}
+
+# ==========================================================
+# S3 BUCKET FOR TERRAFORM STATE
+# ==========================================================
+resource "aws_s3_bucket" "terraform_state" {
+  bucket = "${local.account_id}-terraform-states"
+
+  tags = {
+    Name = "Terraform State Bucket"
+  }
+}
+
+# Enable versioning
+resource "aws_s3_bucket_versioning" "versioning" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Enable encryption
+resource "aws_s3_bucket_server_side_encryption_configuration" "encryption" {
+  bucket = aws_s3_bucket.terraform_state.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# ==========================================================
+# DYNAMODB TABLE FOR STATE LOCKING
+# ==========================================================
+resource "aws_dynamodb_table" "terraform_lock" {
+  name         = "terraform-lock"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+}
+
+# ==========================================================
+# GET LATEST AMAZON LINUX AMI (AUTO FIXES AMI ERRORS)
+# ==========================================================
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+}
+
+# ==========================================================
+# EC2 INSTANCE
+# ==========================================================
+resource "aws_instance" "app_server" {
+
+  ami           = data.aws_ami.amazon_linux.id
+  instance_type = "t2.micro"
+
+  tags = {
+    Name = "Terraform_Demo"
+  }
+}
